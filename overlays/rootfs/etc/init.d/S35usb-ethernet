@@ -1,0 +1,89 @@
+#!/bin/sh
+
+case "$1" in
+    start)
+        echo "Starting USB Ethernet gadget..."
+        
+        rmmod g_ether 2>/dev/null || true
+        
+        modprobe g_ether host_addr=02:22:82:ff:ff:20 dev_addr=02:22:82:ff:ff:22
+        
+        if [ $? -eq 0 ]; then
+            echo "g_ether module loaded successfully"
+        else
+            echo "Failed to load g_ether module"
+            exit 1
+        fi
+        
+        if ip link show usb0 >/dev/null 2>&1; then
+            echo "usb0 interface detected"
+            
+            ip link set usb0 up
+            
+            ip addr add 192.168.7.2/24 dev usb0
+            
+            if [ $? -eq 0 ]; then
+                echo "USB Ethernet gadget started"
+                echo "Beaglebone IP: 192.168.7.2"
+                echo "Expected host IP: 192.168.7.1"
+            else
+                echo "Failed to configure usb0 interface"
+                exit 1
+            fi
+        else
+            echo "usb0 interface not found"
+            exit 1
+        fi
+        ;;
+    
+    stop)
+        echo "Stopping USB Ethernet gadget..."
+        
+        if ip link show usb0 >/dev/null 2>&1; then
+            ip addr flush dev usb0
+            ip link set usb0 down
+            echo "usb0 interface stopped"
+        fi
+
+        rmmod g_ether 2>/dev/null
+        if [ $? -eq 0 ]; then
+            echo "g_ether module removed"
+        else
+            echo "g_ether module was not loaded"
+        fi
+        ;;
+    
+    restart)
+        echo "Restarting USB Ethernet gadget..."
+        $0 stop
+        sleep 1
+        $0 start
+        ;;
+    
+    status)
+        echo "USB Ethernet Gadget Status:"
+        if lsmod | grep -q g_ether; then
+            echo "g_ether module loaded"
+        else
+            echo "g_ether module not loaded"
+        fi
+        
+        if ip link show usb0 >/dev/null 2>&1; then
+            echo "usb0 interface already exists"
+            ip addr show usb0 | grep inet
+        else
+            echo "usb0 interface not found"
+        fi
+        ;;
+    
+    *)
+        echo "Usage: $0 {start|stop|restart|status}"
+        echo "  start   - Bring USB Ethernet gadget up"
+        echo "  stop    - Stop[ USB Ethernet gadget"
+        echo "  restart - Restart USB Ethernet gadget"
+        echo "  status  - Show status"
+        exit 1
+        ;;
+esac
+
+exit 0
