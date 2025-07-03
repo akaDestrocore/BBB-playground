@@ -1,0 +1,18 @@
+{
+    "version": "2.0.0", 
+    "tasks": [
+        {
+            "label": "clean-and-build-bbb",
+            "type": "shell",
+            "command": "bash",
+            "args": [
+                "-c",
+                "export PATH=\"$HOME/.cargo/bin:$PATH\" && rm -f Cargo.lock && cargo build --target armv7-unknown-linux-gnueabihf"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        }
+    ]
+}
