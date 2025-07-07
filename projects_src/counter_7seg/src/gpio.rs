@@ -1,16 +1,67 @@
 use std::{
     fs::{File, OpenOptions},
-    io::{self, Read, Seek, SeekFrom, Write},
-    path::PathBuf, 
-    thread::sleep,
-    time::Duration
+    io::{Read, Write},
+    path::PathBuf,
+    time::Duration,
+    thread::sleep
 };
 
+/// GPIO character device IOCTL definitions
+const GPIO_GET_CHIPINFO_IOCTL: u32 = 0x8044b401;
+const GPIO_GET_LINEINFO_IOCTL: u32 = 0xc048b402;
+const GPIO_GET_LINEHANDLE_IOCTL: u32 = 0xc16cb403;
+const GPIO_GET_LINEEVENT_IOCTL: u32 = 0xc030b404;
+
+/// GPIO handle flags
+const GPIOHANDLE_REQUEST_INPUT: u32 = 0x01;
+const GPIOHANDLE_REQUEST_OUTPUT: u32 = 0x02;
+const GPIOHANDLE_REQUEST_ACTIVE_LOW: u32 = 0x04;
+const GPIOHANDLE_REQUEST_OPEN_DRAIN: u32 = 0x08;
+const GPIOHANDLE_REQUEST_OPEN_SOURCE: u32 = 0x10;
+
+/// GPIO event flags
+const GPIOEVENT_REQUEST_RISING_EDGE: u32 = 0x01;
+const GPIOEVENT_REQUEST_FALLING_EDGE: u32 = 0x02;
+const GPIOEVENT_REQUEST_BOTH_EDGES: u32 = 0x03;
+
+#[repr(C)]
+struct GpioChipInfo {
+    name: [i8; 32],
+    label: [i8; 32], 
+    lines: u32,
+}
+
+#[repr(C)]
+struct GpioHandleRequest {
+    line_offsets: [u32; 64],
+    flags: u32,
+    default_values: [u8; 64],
+    consumer_label: [i8; 32],
+    lines: u32,
+    fd: i32,
+}
+
+#[repr(C)]
+struct GpioEventRequest {
+    line_offset: u32,
+    handle_flags: u32,
+    event_flags: u32,
+    consumer_label: [i8; 32],
+    fd: i32,
+}
+
+#[repr(C)]
+struct GpioHandleData {
+    values: [u8; 64],
+}
+
 #[derive(Debug)]
-pub enum GpioError {
-    Io(io::Error),
-    NotExported,
-    InvalidValue
+pub enum  GpioError {
+    Io(std::io::Error),
+    InvalidValue,
+    ChipNotFound,
+    LineBusy,
+    PermissionDenied,
 }
 
 pub type GpioResult<T> = Result<T, GpioError>;
@@ -25,167 +76,62 @@ pub enum Level {
     High,
 }
 
+pub enum Edge {
+    None,
+    Rising,
+    Falling,
+    Both,
+}
+
+pub enum ActiveLevel {
+    Low,
+    High,
+}
+
 pub struct Gpio {
     pin: u16,
-    dir_f: File,
-    value_f: File,
+    chip_fd: Option<File>,
+    handle_fd: Option<File>,
+    event_fd: Option<File>,
+    direction: Direction,
+    active_level: ActiveLevel,
 }
 
 impl Gpio {
-    /// Creates a new GPIO object for the given pin.
-    /// 
-    /// # Arguments
-    /// * `pin` - The GPIO pin number.
-    /// * `_dir` - The direction of the GPIO pin (input or output).
-    /// * `_lvl` - The level of the GPIO pin (low or high).
-    /// 
-    /// # Returns
-    /// * `gpio` - A new GPIO object.
-    pub fn new(pin: u16, _dir: Direction, _lvl: Level) -> GpioResult<Self> {
-        let path = PathBuf::from(format!("/sys/class/gpio/gpio{}", pin));
-
-        Self::export(pin)?;
+    pub fn new(pin: u16, _dir: Direction, _lvl: Level, _edge: Edge) -> GpioResult<Self> {
         
-        sleep(Duration::from_millis(10));
+        let chip_fd = Self::open_chip(0)?;
 
-        let value_file = OpenOptions::new()
-            .write(true)
-            .read(true)
-            .open(path.join("value"))
-            .map_err(GpioError::Io)?;
-        
-        let dir_file = OpenOptions::new()
-            .write(true)
-            .read(true)
-            .open(path.join("direction"))
-            .map_err(GpioError::Io)?;
-
-        let mut gpio = Self {
-            pin,
-            dir_f: dir_file,
-            value_f: value_file
+        let mut gpio = Self { 
+            pin, 
+            chip_fd: Some(chip_fd), 
+            handle_fd: None, 
+            event_fd: None, 
+            direction: _dir, 
+            active_level: ActiveLevel::High 
         };
 
         gpio.set_direction(_dir)?;
-        gpio.set_value(_lvl)?;
+        if matches!(_dir, Direction::Out) {
+            gpio.set_value(_lvl)?;
+        } 
+
+        if !matches!(_edge, Edge::None) {
+            gpio.set_edge(_edge)?;    
+        }
 
         Ok(gpio)
     }
 
-    /// Sets the direction of the GPIO pin.
-    /// 
-    /// # Arguments
-    /// * `_dir` - The direction of the GPIO pin.
-    /// 
-    /// # Returns
-    /// * `GpioResult<()>` - A result indicating success or failure.
     pub fn set_direction(&mut self, _dir: Direction) -> GpioResult<()> {
-        
-        let d = match _dir {
-            Direction::In => "in",
-            Direction::Out => "out"
-        };
-
-        self.dir_f
-            .seek(SeekFrom::Start(0))
-            .map_err(GpioError::Io)?;
-        self.dir_f
-            .write_all(d.as_bytes())
-            .map_err(GpioError::Io)?;
-        self.dir_f
-            .flush()
-            .map_err(GpioError::Io)?;
-
         Ok(())
     }
 
-    /// Sets the value of the GPIO pin.
-    /// 
-    /// # Arguments
-    /// * `_lvl` - The value of the GPIO pin.
-    /// 
-    /// # Returns
-    /// * `GpioResult<()>` - A result indicating success or failure.
     pub fn set_value(&mut self, _lvl: Level) -> GpioResult<()> {
-
-        let v = match _lvl {
-            Level::Low => "0",
-            Level::High => "1"
-        };
-
-        self.value_f
-            .seek(SeekFrom::Start(0))
-            .map_err(GpioError::Io)?;
-        self.value_f
-            .write_all(v.as_bytes())
-            .map_err(GpioError::Io)?;
-        self.value_f.flush()
-            .map_err(GpioError::Io)?;
-
         Ok(())
     }
 
-    /// Exports the GPIO pin to the system.
-    /// 
-    /// # Returns
-    /// * `GpioResult<()>` - A result indicating success or failure.
-    pub fn export(pin: u16) -> GpioResult<()> {
-        let path = PathBuf::from("/sys/class/gpio");
-
-        let mut file = OpenOptions::new()
-            .write(true)
-            .open(path.join("export"))
-            .map_err(GpioError::Io)?;
-
-        match file.write_all(pin.to_string().as_bytes()) {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                match e.kind() {
-                    io::ErrorKind::InvalidInput => Ok(()),
-                    _ => Err(GpioError::Io(e)),
-                }
-            }
-        }
-    }
-
-    /// Unexports the GPIO pin from the system.
-    /// 
-    /// # Returns
-    /// * `GpioResult<()>` - A result indicating success or failure.
-    pub fn unexport(&mut self, pin: u16) -> GpioResult<()> {
-        let path = PathBuf::from("/sys/class/gpio");
-        let mut file = OpenOptions::new()
-            .write(true)
-            .open(path.join("unexport"))
-            .map_err(GpioError::Io)?;
-        file.write_all(pin.to_string().as_bytes())
-            .map_err(GpioError::Io)?;
-        
+    pub fn set_edge(&mut self, _edge: Edge) -> GpioResult<()> {
         Ok(())
-    }
-
-    /// Reads the value of the GPIO pin.
-    /// 
-    /// # Returns
-    /// * `GpioResult<Level>` - A result indicating the value of the GPIO pin.
-    pub fn read_value(&mut self) -> GpioResult<Level> {
-        let mut buffer =  [0u8; 1];
-
-        self.value_f.seek(SeekFrom::Start(0))
-            .map_err(GpioError::Io)?;
-        self.value_f.read_exact(&mut buffer)
-            .map_err(GpioError::Io)?;
-
-        match buffer[0] {
-            b'0' => Ok(Level::Low),
-            b'1' => Ok(Level::High),
-            _ => Err(GpioError::InvalidValue),
-        }
-    }
-}
-
-impl Drop for Gpio {
-    fn drop(&mut self) {
-        let _ = self.unexport(self.pin);
     }
 }

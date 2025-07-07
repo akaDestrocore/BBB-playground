@@ -7,6 +7,11 @@ use std::{
 };
 
 mod gpio;
+mod seven_segment;
+
+use seven_segment::{SevenSegmentDisplay};
+use gpio::{ActiveLevel, Direction, Edge, Gpio, GpioError, GpioResult, Level};
+
 
 /// Script entry point.
 /// 
@@ -18,46 +23,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect::<Vec<String>>();
 
     if args.len() != 3 {
-
         let usage_txt: String = format!(r#"usage: {} <direction> <delay>
 Valid direction : up, down,updown,random
 Recommended delay range in ms : 0 to 1000"#, args[0]);
         println!("{}", usage_txt);
+        
+       let mut display1 = SevenSegmentDisplay::new().unwrap();
+        display1.display_set_dp(gpio::Level::Low).unwrap();
+        display1.display_digit(0).unwrap();
+        
     } else {
         let delay_value: u32 = args[2].parse().unwrap();
 
         if args[1] == "up" {
-            // up count
-            let res = counter_up(delay_value);
-            match res {
-                Ok(_) => println!("Up Counting done"),
-                Err(e) => eprintln!("{}", e),
-            }
+            
+            return Ok(());
         } else if args[1] == "down" {
-            // down count
-            // let res = counter_down(delay_value);
-            Ok(());
+
+            return Ok(());
+        } else if args[1] == "updown" {
+
+            return Ok(());
+        } else if args[1] == "random" {
+
+            return Ok(());
         }
-
     }
 
     Ok(())
 }
-
-/// Counter up function.
-///
-/// # Arguments
-///
-/// * `delay` - delay in ms
-///
-/// # Returns
-///
-/// Result<(), Box<dyn Error>>  
-fn counter_up(delay: u32) -> Result<(), Box<dyn std::error::Error>> {
-
-    if init_gpios() < 0 {
-        return Err("GPIO init failed".into());
-    }
-    Ok(())
-}
-
