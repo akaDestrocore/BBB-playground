@@ -163,6 +163,17 @@ pub struct Gpio {
 }
 
 impl Gpio {
+    /// this function is used to create a new GPIO object.
+    /// 
+    /// # Arguments
+    /// * `pin` - the pin number to be used for this GPIO object.
+    /// * `dir` - the direction of this GPIO object.
+    /// * `lvl` - the level of this GPIO object.
+    /// * `edge` - the edge of this GPIO object.
+    /// 
+    /// # Returns
+    /// * `Gpio` - the new GPIO object.
+    /// 
     pub fn new(pin:u16, dir: Direction, lvl: Level, edge: Edge) -> GpioResult<Self> {
         
         let mut gpio = Self {
@@ -173,61 +184,176 @@ impl Gpio {
             lines_output: None,
         };
 
-
-        // TODO:
         gpio.set_direction(dir)?;
-        gpio.set_value(lvl)?;
+        if matches!(dir, Direction::Out) {
+            gpio.set_value(lvl)?;
+        }
+        if !matches!(edge, Edge::None) {
+            gpio.set_edge(edge)?;
+        }
 
         Ok(gpio)
+    }
+    
+    pub fn get_pin_info(&self) -> GpioResult<PinInfo> {
+        let manager = get_chip_manager()?;
+        
+        let pin_info = manager.get_pin_info(self.pin)?.clone();
+
+        Ok(pin_info)
     }
 
     pub fn set_direction(&mut self, dir: Direction) -> GpioResult<()> {
         self.direction = dir;
-        // TODO: 
         
+        let manager = get_chip_manager()?;
+        let pin_info = manager.get_pin_info(self.pin)?;
+        let chip = manager.get_chip_for_pin(self.pin)?;
+        
+        self.lines_input = None;
+        self.lines_output = None;
+
+        let active_low = match self.active_level {
+            ActiveLevel::Low => Active::Low,
+            ActiveLevel::High => Active::High,
+        };
+
+        let consumer_n = &format!("rust-gpio-{}",self.pin);
+
+        match dir {
+            Direction::Out => {
+                let options = Options::output([pin_info.line_offset])
+                    .consumer(&consumer_n)
+                    .active(active_low);
+
+                self.lines_output = Some(chip.request_lines(options)?);
+            },
+            Direction::In => {
+                let options = Options::input([pin_info.line_offset])
+                    .consumer(consumer_n)
+                    .active(active_low);
+
+                self.lines_input = Some(chip.request_lines(options)?);
+            },
+        }
+
         Ok(())
     }
 
     pub fn set_value(&mut self, lvl: Level) -> GpioResult<()> {
-        // TODO:
+        if let Some(ref lines) = &self.lines_output {
+            let value = match lvl {
+                Level::Low => false,
+                Level::High => true,
+            };
 
-        Ok(())
+            lines.set_values([value])?;
+            Ok(())
+        } else {
+            Err(GpioError::NotExported)
+        }
     }
 
     pub fn set_edge(&mut self, edge: Edge) -> GpioResult<()> {
-        // TODO:
+        if matches!(edge, Edge::None) {
+            return Ok(());
+        }
+        
+        let manager = get_chip_manager()?;
+        let pin_info = manager.get_pin_info(self.pin)?;
+        let chip = manager.get_chip_for_pin(self.pin)?;
 
+        let gpiod_edge = match edge {
+            Edge::Rising => EdgeDetect::Rising,
+            Edge::Falling => EdgeDetect::Falling,
+            Edge::Both => EdgeDetect::Both,
+            Edge::None => return Ok(()),
+        };
+        
+        let active_low = match self.active_level {
+            ActiveLevel::Low => Active::Low,
+            ActiveLevel::High => Active::High,
+        };
+
+        let consumer_n = &format!("rust-gpio-event-{}", self.pin);
+
+        let options = Options::input([pin_info.line_offset])
+            .consumer(consumer_n)
+            .active(active_low)
+            .edge(gpiod_edge);
+
+        self.lines_input = Some(chip.request_lines(options)?);
         Ok(())
     }
 
-    pub fn read_value(&self) -> GpioResult<Level> {
-        // TODO:
-
-        Ok(Level::Low)
+    pub fn read_value(&mut self) -> GpioResult<Level> {
+        if let Some(ref lines) = self.lines_input {
+            let mut values: [bool; 1] = [false; 1];
+            lines.get_values(&mut values)?;
+            
+            match values[0] {
+                false => Ok(Level::Low),
+                true => Ok(Level::High),
+                _ => Err(GpioError::InvalidValue),
+            }
+        } else if let Some(ref lines) = self.lines_output {
+            let mut values: [bool; 1] = [false; 1];
+            lines.get_values(&mut values)?;
+            
+            match values[0] {
+                false => Ok(Level::Low),
+                true => Ok(Level::High),
+                _ => Err(GpioError::InvalidValue),
+            }
+        } else {
+            Err(GpioError::NotExported)
+        }
     }
 
-    pub fn read_direction(&mut self) -> GpioResult<Direction> {
-        // TODO:
-
-        Ok(Direction::In)
+     pub fn read_direction(&mut self) -> GpioResult<Direction> {
+        Ok(self.direction)
     }
 
     pub fn read_edge(&mut self) -> GpioResult<Edge> {
-        // TODO:
-
-        Ok(Edge::None)
+        if self.lines_input.is_some() {
+            Ok(Edge::Both)
+        } else {
+            Ok(Edge::None)
+        }
     }
 
-    pub fn set_active_low(&mut self, active_low: ActiveLevel) -> GpioResult<()> {
-        // TODO:
-
+    pub fn set_active_low(&mut self, active: ActiveLevel) -> GpioResult<()> {
+        self.active_level = active;
+        
+        let current_dir = self.direction;
+        self.set_direction(current_dir)?;
+        
         Ok(())
     }
 
     pub fn read_active_low(&mut self) -> GpioResult<ActiveLevel> {
-        // TODO:
-
         Ok(self.active_level)
+    }
+
+    pub fn get_pin(&self) -> u16 {
+        self.pin
+    }
+
+    pub fn is_exported(pin: u16) -> bool {
+        if let Ok(manager) = get_chip_manager() {
+            manager.get_pin_info(pin).is_ok()
+        } else {
+            false
+        }
+    }
+
+    pub fn toggle(&mut self) -> GpioResult<()> {
+        let current_value = self.read_value()?;
+        let new_value = match current_value {
+            Level::Low => Level::High,
+            Level::High => Level::Low,
+        };
+        self.set_value(new_value)
     }
 
 }
