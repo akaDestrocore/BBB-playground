@@ -3,14 +3,15 @@ use std::{
     fmt::format, 
     fs::OpenOptions, 
     io::Write,
-    path::PathBuf
+    path::PathBuf,
+    thread::sleep,
+    time::{Duration, Instant},
 };
 
-mod gpio;
 mod seven_segment;
+mod counter;
 
 use seven_segment::{SevenSegmentDisplay};
-use gpio::{ActiveLevel, Direction, Edge, Gpio, GpioError, GpioResult, Level};
 
 
 /// Script entry point.
@@ -28,14 +29,12 @@ Valid direction : up, down,updown,random
 Recommended delay range in ms : 0 to 1000"#, args[0]);
         println!("{}", usage_txt);
         
-       let mut display1 = SevenSegmentDisplay::new().unwrap();
-        display1.display_set_dp(gpio::Level::Low).unwrap();
-        display1.display_digit(0).unwrap();
-        
     } else {
-        let delay_value: u32 = args[2].parse().unwrap();
+        let delay_value: u64 = args[2].parse().unwrap();
+        let mut counter = counter::Counter::new()?;
 
         if args[1] == "up" {
+            counter.count_up(delay_value)?;
             
             return Ok(());
         } else if args[1] == "down" {

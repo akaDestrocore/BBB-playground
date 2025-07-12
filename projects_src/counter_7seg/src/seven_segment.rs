@@ -1,10 +1,10 @@
-use std::{
-    io::{self, Read, Seek, SeekFrom, Write},
-    path::PathBuf, 
-    collections::HashMap
+use std::collections::HashMap;
+
+use gpiocdev::{
+    line::Value,
+    request::Request,
 };
 
-use crate::gpio::{self, ActiveLevel, Direction, Edge, Gpio, GpioError, GpioResult, Level};
 
 /*==================================================================================
 BBB_P8_pins                         GPIO number            7Seg Display segment
@@ -19,182 +19,174 @@ P8_14                                  GPIO-634                     F
 P8_16                                  GPIO-526                     G
 =================================================================================== */
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum LedPins {
-    P8_7SegA = 546,
-    P8_8SegB = 547,
-    P8_9SegC = 549,
-    P8_10Dp = 548,
-    P8_11SegD = 525,
-    P8_12SegE = 524,
-    P8_14SegF = 634,
-    P8_16SegG = 526,
-}
+const GPIO_SEG_A: u32 = 546;
+const GPIO_SEG_B: u32 = 547;
+const GPIO_SEG_C: u32 = 549;
+const GPIO_SEG_DP: u32 = 548;
+const GPIO_SEG_D: u32 = 525;
+const GPIO_SEG_E: u32 = 524;
+const GPIO_SEG_F: u32 = 634;
+const GPIO_SEG_G: u32 = 526;
 
 pub struct SevenSegmentDisplay {
-    segments: HashMap<LedPins, Gpio>,
+    lines: HashMap<u32, (u32, Request)>,
 }
 
 impl SevenSegmentDisplay {
-    /// Creates a new SevenSegmentDisplay instance.
-    /// 
-    /// # Arguments
-    /// * `led_pins` - A slice of LedPins enum values.
-    /// 
-    /// # Returns
-    /// * `SevenSegmentDisplay` - A new SevenSegmentDisplay instance.
-    pub fn new() -> GpioResult<Self> {
-
-        let led_pins = [
-            LedPins::P8_7SegA,
-            LedPins::P8_8SegB,
-            LedPins::P8_9SegC,
-            LedPins::P8_10Dp,
-            LedPins::P8_11SegD,
-            LedPins::P8_12SegE,
-            LedPins::P8_14SegF,
-            LedPins::P8_16SegG,
+    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        
+        let mut lines = HashMap::new();
+        
+        let pins = [
+            GPIO_SEG_A, GPIO_SEG_B, GPIO_SEG_C, GPIO_SEG_DP,
+            GPIO_SEG_D, GPIO_SEG_E, GPIO_SEG_F, GPIO_SEG_G,
         ];
 
-        let mut segments = HashMap::new();
-
-        for pin in led_pins.iter() {
-            let gpio = Gpio::new(*pin as u16, Direction::Out, Level::Low, Edge::None)?;
-            segments.insert(*pin, gpio);
-            println!("Initialized pin {} successfully!", *pin as u16);
+        for &pin in &pins {
+            let (chip_path, offset) = Self::get_chip_offset(pin)?;
+            
+            let req = Request::builder()
+                .on_chip(chip_path)
+                .with_line(offset)
+                .as_output(Value::Inactive)
+                .request()?;
+            
+            lines.insert(pin, (offset, req));
         }
 
-        Ok(SevenSegmentDisplay { segments })
+        Ok(Self { lines })
     }
 
-    /// This function sets the value of a specific segment on the seven-segment display.
-    /// 
-    /// # Arguments
-    /// * `segment` - The segment to set the value for.
-    /// * `state` - The value to set the segment to. Can be either Level::Low or Level::High.
-    /// 
-    /// # Returns
-    /// A `GpioResult` indicating the success or failure of the operation.
-    pub fn set_segment(&mut self, segment: LedPins, state: Level) -> GpioResult<()> {
+
+    fn get_chip_offset(pin: u32) -> Result<(&'static str, u32), Box<dyn std::error::Error>> {
         
-        if let Some(gpio) = self.segments.get_mut(&segment) {
-            gpio.set_value(state)
-        } else {
-            Err(GpioError::NotExported)
+        match pin {
+            512..=543 => Ok(("/dev/gpiochip0", pin - 512)),
+            544..=575 => Ok(("/dev/gpiochip1", pin - 544)),
+            576..=607 => Ok(("/dev/gpiochip2", pin - 576)),
+            608..=639 => Ok(("/dev/gpiochip3", pin - 608)),
+            _ => Err(format!("Unsupported pin: {}", pin).into()),
         }
     }
 
-    /// This function clears the display on the seven-segment display.
-    /// 
-    /// # Returns
-    /// A `GpioResult` indicating the success or failure of the operation.
-    pub fn clear_display(&mut self) -> GpioResult<()> {
-        for gpio in self.segments.values_mut() {
-            gpio.set_value(Level::Low);
-        }
+    pub fn set_segment(&mut self, pin: u32, value: Value) -> Result<(), Box<dyn std::error::Error>> {
+        
+        self.lines.get(&pin)
+            .ok_or_else(|| format!("Pin {} not initialized", pin))?
+            .1
+            .set_value(self.lines[&pin].0, value)?;
+
         Ok(())
     }
 
-    /// This function displays a digit on the seven-segment display.
-    /// 
-    /// # Arguments
-    /// * `digit` - The digit to display. Can be any value from 0 to 9.
-    /// 
-    /// # Returns
-    /// A `GpioResult` indicating the success or failure of the operation.
-    pub fn display_digit(&mut self, digit: u8) -> GpioResult<()> {
-        self.clear_display();
+    pub fn clear_all(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        
+        let all_segments = [
+            GPIO_SEG_A, GPIO_SEG_B, GPIO_SEG_C, GPIO_SEG_D,
+            GPIO_SEG_DP, GPIO_SEG_E, GPIO_SEG_F, GPIO_SEG_G,
+        ];
+        
+        for &segment in &all_segments {
+            self.set_segment(segment, Value::Inactive)?;
+        }
 
-        let digit_segs = match digit {
-                0 => vec![
-                    LedPins::P8_7SegA,
-                    LedPins::P8_8SegB,
-                    LedPins::P8_9SegC,
-                    LedPins::P8_11SegD,
-                    LedPins::P8_12SegE,
-                    LedPins::P8_14SegF,
-                ],
-                1 => vec![
-                    LedPins::P8_8SegB,
-                    LedPins::P8_9SegC,
-                ],
-                2 => vec![
-                    LedPins::P8_7SegA,
-                    LedPins::P8_8SegB,
-                    LedPins::P8_16SegG,
-                    LedPins::P8_12SegE,
-                    LedPins::P8_11SegD
-                ],
-                3 => vec![
-                    LedPins::P8_7SegA,
-                    LedPins::P8_8SegB,
-                    LedPins::P8_16SegG,
-                    LedPins::P8_9SegC,
-                    LedPins::P8_11SegD
-                ],
-                4 => vec![
-                    LedPins::P8_14SegF,
-                    LedPins::P8_16SegG,
-                    LedPins::P8_8SegB,
-                    LedPins::P8_9SegC,
-                ],
-                5 => vec![
-                    LedPins::P8_7SegA,
-                    LedPins::P8_14SegF,
-                    LedPins::P8_16SegG,
-                    LedPins::P8_9SegC,
-                    LedPins::P8_11SegD
-                ],
-                6 => vec![
-                    LedPins::P8_7SegA,
-                    LedPins::P8_14SegF,
-                    LedPins::P8_16SegG,
-                    LedPins::P8_12SegE,
-                    LedPins::P8_9SegC,
-                    LedPins::P8_11SegD
-                ],
-                7 => vec![
-                    LedPins::P8_7SegA,
-                    LedPins::P8_8SegB,
-                    LedPins::P8_9SegC
-                ],
-                8 => vec![
-                    LedPins::P8_7SegA,
-                    LedPins::P8_8SegB,
-                    LedPins::P8_9SegC,
-                    LedPins::P8_11SegD,
-                    LedPins::P8_12SegE,
-                    LedPins::P8_14SegF,
-                    LedPins::P8_16SegG
-                ],
-                9 => vec![
-                    LedPins::P8_7SegA,
-                    LedPins::P8_8SegB,
-                    LedPins::P8_9SegC,
-                    LedPins::P8_11SegD,
-                    LedPins::P8_14SegF,
-                    LedPins::P8_16SegG
-                ],
-                _ => return Err(GpioError::InvalidValue),
+        Ok(())
+    }
+
+    pub fn set_digit(&mut self, digit: u8) -> Result<(), Box<dyn std::error::Error>> {
+        
+        self.clear_all()?;
+
+        match digit {
+            0 => {
+                self.set_segment(GPIO_SEG_A, Value::Active)?;
+                self.set_segment(GPIO_SEG_B, Value::Active)?;
+                self.set_segment(GPIO_SEG_C, Value::Active)?;
+                self.set_segment(GPIO_SEG_D, Value::Active)?;
+                self.set_segment(GPIO_SEG_E, Value::Active)?;
+                self.set_segment(GPIO_SEG_F, Value::Active)?;
+            },
+            1 => {
+                self.set_segment(GPIO_SEG_B, Value::Active)?;
+                self.set_segment(GPIO_SEG_C, Value::Active)?;
+            },
+            2 => {
+                self.set_segment(GPIO_SEG_A, Value::Active)?;
+                self.set_segment(GPIO_SEG_B, Value::Active)?;
+                self.set_segment(GPIO_SEG_G, Value::Active)?;
+                self.set_segment(GPIO_SEG_E, Value::Active)?;
+                self.set_segment(GPIO_SEG_D, Value::Active)?;
+            },
+            3 => {
+                self.set_segment(GPIO_SEG_A, Value::Active)?;
+                self.set_segment(GPIO_SEG_B, Value::Active)?;
+                self.set_segment(GPIO_SEG_G, Value::Active)?;
+                self.set_segment(GPIO_SEG_C, Value::Active)?;
+                self.set_segment(GPIO_SEG_D, Value::Active)?;
+            },
+            4 => {
+                self.set_segment(GPIO_SEG_F, Value::Active)?;
+                self.set_segment(GPIO_SEG_B, Value::Active)?;
+                self.set_segment(GPIO_SEG_G, Value::Active)?;
+                self.set_segment(GPIO_SEG_C, Value::Active)?;
+            },
+            5 => {
+                self.set_segment(GPIO_SEG_A, Value::Active)?;
+                self.set_segment(GPIO_SEG_F, Value::Active)?;
+                self.set_segment(GPIO_SEG_G, Value::Active)?;
+                self.set_segment(GPIO_SEG_C, Value::Active)?;
+                self.set_segment(GPIO_SEG_D, Value::Active)?;
+            },
+            6 => {
+                self.set_segment(GPIO_SEG_A, Value::Active)?;
+                self.set_segment(GPIO_SEG_F, Value::Active)?;
+                self.set_segment(GPIO_SEG_G, Value::Active)?;
+                self.set_segment(GPIO_SEG_E, Value::Active)?;
+                self.set_segment(GPIO_SEG_C, Value::Active)?;
+                self.set_segment(GPIO_SEG_D, Value::Active)?;
+            },
+            7 => {
+                self.set_segment(GPIO_SEG_A, Value::Active)?;
+                self.set_segment(GPIO_SEG_B, Value::Active)?;
+                self.set_segment(GPIO_SEG_C, Value::Active)?;
+            },
+            8 => {
+                self.set_segment(GPIO_SEG_A, Value::Active)?;
+                self.set_segment(GPIO_SEG_B, Value::Active)?;
+                self.set_segment(GPIO_SEG_C, Value::Active)?;
+                self.set_segment(GPIO_SEG_D, Value::Active)?;
+                self.set_segment(GPIO_SEG_E, Value::Active)?;
+                self.set_segment(GPIO_SEG_F, Value::Active)?;
+                self.set_segment(GPIO_SEG_G, Value::Active)?;
+            },
+            9 => {
+                self.set_segment(GPIO_SEG_A, Value::Active)?;
+                self.set_segment(GPIO_SEG_B, Value::Active)?;
+                self.set_segment(GPIO_SEG_C, Value::Active)?;
+                self.set_segment(GPIO_SEG_D, Value::Active)?;
+                self.set_segment(GPIO_SEG_F, Value::Active)?;
+                self.set_segment(GPIO_SEG_G, Value::Active)?;
+            },
+            10 => {
+                self.set_segment(GPIO_SEG_A, Value::Active)?;
+                self.set_segment(GPIO_SEG_G, Value::Active)?;
+                self.set_segment(GPIO_SEG_E, Value::Active)?;
+                self.set_segment(GPIO_SEG_D, Value::Active)?;
+                self.set_segment(GPIO_SEG_C, Value::Active)?;
+            },
+            _ => (),
         };
 
-        for segment in digit_segs {
-            self.set_segment(segment, Level::High)?;
-        }
-
         Ok(())
     }
 
-    /// Set the decimal point segment to a given level.
-    /// 
-    /// # Arguments
-    /// * `segment` - The segment to set.
-    /// * `level` - The level to set the segment to.
-    /// 
-    /// # Returns
-    /// * `GpioError` - An error if the segment is not exported.
-    pub fn display_set_dp(&mut self, state: Level) -> GpioResult<()> {
-        self.set_segment(LedPins::P8_10Dp, state)
+    pub fn set_decimal_point(&mut self, state: bool) -> Result<(), Box<dyn std::error::Error>> {
+        self.set_segment(GPIO_SEG_DP, if state { Value::Active } else { Value::Inactive })
     }
+}
 
+impl Drop for SevenSegmentDisplay {
+    fn drop(&mut self) {
+        let _ = self.clear_all();
+    }
 }
