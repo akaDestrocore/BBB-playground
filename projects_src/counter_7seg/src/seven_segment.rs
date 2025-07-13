@@ -28,11 +28,30 @@ const GPIO_SEG_E: u32 = 524;
 const GPIO_SEG_F: u32 = 634;
 const GPIO_SEG_G: u32 = 526;
 
+/// A struct representing a seven-segment display.
+/// 
+/// # Fields
+/// * `lines` - A HashMap containing the lines of the display and their corresponding requests.
+/// 
+/// # Examples
+/// ```
+/// let display = SevenSegmentDisplay::new()?;
+/// loop {
+///    for i in 0..=10 {
+///            self.display.set_digit(i)?;
+///            thread::sleep(Duration::from_millis(delay));
+///        }
+///    }
+/// ```
 pub struct SevenSegmentDisplay {
     lines: HashMap<u32, (u32, Request)>,
 }
 
 impl SevenSegmentDisplay {
+    /// Create a new instance of the SevenSegmentDisplay struct.
+    /// 
+    /// # Returns
+    /// * `SevenSegmentDisplay` - A new instance of the SevenSegmentDisplay struct.
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         
         let mut lines = HashMap::new();
@@ -57,7 +76,13 @@ impl SevenSegmentDisplay {
         Ok(Self { lines })
     }
 
-
+    /// Get the chip offset for a given GPIO pin.
+    /// 
+    /// # Arguments
+    /// * `pin` - The GPIO pin number.
+    /// 
+    /// # Returns
+    /// * `Result<(&'static str, u32), Box<dyn std::error::Error>>` - A tuple containing the chip path and offset.
     fn get_chip_offset(pin: u32) -> Result<(&'static str, u32), Box<dyn std::error::Error>> {
         
         match pin {
@@ -69,6 +94,14 @@ impl SevenSegmentDisplay {
         }
     }
 
+    /// Set the value of a segment on the display.
+    /// 
+    /// # Arguments
+    /// * `pin` - The GPIO pin number.
+    /// * `value` - The value to set the segment to ( `Value::Active` or `Value::Inactive`). 
+    /// 
+    /// # Returns
+    /// * `Result<(), Box<dyn Error>>` - An error if the pin is not initialized.
     pub fn set_segment(&mut self, pin: u32, value: Value) -> Result<(), Box<dyn std::error::Error>> {
         
         self.lines.get(&pin)
@@ -79,6 +112,10 @@ impl SevenSegmentDisplay {
         Ok(())
     }
 
+    /// Clear all segments on the display.
+    /// 
+    /// # Returns
+    /// * `Result<(), Box<dyn Error>>` - An error if the pin is not initialized.
     pub fn clear_all(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         
         let all_segments = [
@@ -93,6 +130,13 @@ impl SevenSegmentDisplay {
         Ok(())
     }
 
+    /// Set a digit on the display.
+    /// 
+    /// # Arguments
+    /// * `digit` - The digit to set. Must be between 0 and 10 (inclusive).
+    /// 
+    /// # Returns
+    /// * `Result<(), Box<dyn Error>>` - An error if the pin is not initialized.
     pub fn set_digit(&mut self, digit: u8) -> Result<(), Box<dyn std::error::Error>> {
         
         self.clear_all()?;
@@ -180,11 +224,19 @@ impl SevenSegmentDisplay {
         Ok(())
     }
 
+    /// Sets the value of decimal point segment.
+    /// 
+    /// # Arguments
+    /// * `state` - The value to set the decimal point segment.
+    /// 
+    /// # Returns
+    /// * `Result<(), Box<dyn Error>>` - Result of the operation.
     pub fn set_decimal_point(&mut self, state: bool) -> Result<(), Box<dyn std::error::Error>> {
         self.set_segment(GPIO_SEG_DP, if state { Value::Active } else { Value::Inactive })
     }
 }
 
+/// Drop implementation to clear all segments when the object is dropped.
 impl Drop for SevenSegmentDisplay {
     fn drop(&mut self) {
         let _ = self.clear_all();
