@@ -1,18 +1,13 @@
-use std::{
-    env, 
-    fmt::format, 
-    fs::OpenOptions, 
-    io::Write,
-    path::PathBuf,
-    thread::sleep,
-    time::{Duration, Instant},
-};
+use std::env;
 
 mod seven_segment;
 mod counter;
 
-use seven_segment::{SevenSegmentDisplay};
-
+/// Organized variable configuration for the script.
+pub mod config{
+    pub const MAX_DELAY_MS: u64 = 9999;
+    pub const DEFAULT_DELAY_MS: u64 = 1000;
+}
 
 /// Script entry point.
 /// 
@@ -30,8 +25,12 @@ Recommended delay range in ms : 0 to 1000"#, args[0]);
         println!("{}", usage_txt);
         
     } else {
-        let delay_value: u64 = args[2].parse().unwrap();
+        let mut delay_value: u64 = args[2].parse().map_err(|_|"Delay value must be a number")?;
         let mut counter = counter::Counter::new()?;
+        if delay_value > config::MAX_DELAY_MS {
+            println!("Delay value must be less than or equal to {}", config::MAX_DELAY_MS);
+            delay_value = config::DEFAULT_DELAY_MS;
+        }
 
         if args[1] == "up" {
             counter.count_up(delay_value)?;
