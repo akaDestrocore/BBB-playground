@@ -18,15 +18,32 @@ P8_12                                  GPIO-524                     E
 P8_14                                  GPIO-634                     F
 P8_16                                  GPIO-526                     G
 =================================================================================== */
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Segment {
+    A,
+    B,
+    C,
+    DP,
+    D,
+    E,
+    F,
+    G,
+}
 
-const GPIO_SEG_A: u32 = 546;
-const GPIO_SEG_B: u32 = 547;
-const GPIO_SEG_C: u32 = 549;
-const GPIO_SEG_DP: u32 = 548;
-const GPIO_SEG_D: u32 = 525;
-const GPIO_SEG_E: u32 = 524;
-const GPIO_SEG_F: u32 = 634;
-const GPIO_SEG_G: u32 = 526;
+impl Segment {
+    fn gpio(self) -> u32 {
+        match self {
+            Segment::A => 546,
+            Segment::B => 547,
+            Segment::C => 549,
+            Segment::DP => 548,
+            Segment::D => 525,
+            Segment::E => 524,
+            Segment::F => 634,
+            Segment::G => 526,
+        }
+    }
+}
 
 /// A struct representing a seven-segment display.
 /// 
@@ -56,13 +73,14 @@ impl SevenSegmentDisplay {
         
         let mut lines = HashMap::new();
         
-        let pins = [
-            GPIO_SEG_A, GPIO_SEG_B, GPIO_SEG_C, GPIO_SEG_DP,
-            GPIO_SEG_D, GPIO_SEG_E, GPIO_SEG_F, GPIO_SEG_G,
+        let segments = [
+            Segment::A, Segment::B, Segment::C, Segment::DP,
+            Segment::D, Segment::E, Segment::F, Segment::G,
         ];
 
-        for &pin in &pins {
-            let (chip_path, offset) = Self::get_chip_offset(pin)?;
+        for &seg in &segments {
+
+            let (chip_path, offset) = Self::get_chip_offset(seg.gpio())?;
             
             let req = Request::builder()
                 .on_chip(chip_path)
@@ -70,7 +88,7 @@ impl SevenSegmentDisplay {
                 .as_output(Value::Inactive)
                 .request()?;
             
-            lines.insert(pin, (offset, req));
+            lines.insert(seg.gpio(), (offset, req));
         }
 
         Ok(Self { lines })
@@ -102,12 +120,12 @@ impl SevenSegmentDisplay {
     /// 
     /// # Returns
     /// * `Result<(), Box<dyn Error>>` - An error if the pin is not initialized.
-    pub fn set_segment(&mut self, pin: u32, value: Value) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn set_segment(&mut self, seg: Segment, value: Value) -> Result<(), Box<dyn std::error::Error>> {
         
-        self.lines.get(&pin)
-            .ok_or_else(|| format!("Pin {} not initialized", pin))?
+        self.lines.get(&seg.gpio())
+            .ok_or_else(|| format!("Pin {} not initialized", seg.gpio()))?
             .1
-            .set_value(self.lines[&pin].0, value)?;
+            .set_value(self.lines[&seg.gpio()].0, value)?;
 
         Ok(())
     }
@@ -118,13 +136,13 @@ impl SevenSegmentDisplay {
     /// * `Result<(), Box<dyn Error>>` - An error if the pin is not initialized.
     pub fn clear_all(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         
-        let all_segments = [
-            GPIO_SEG_A, GPIO_SEG_B, GPIO_SEG_C, GPIO_SEG_D,
-            GPIO_SEG_DP, GPIO_SEG_E, GPIO_SEG_F, GPIO_SEG_G,
+        let segments = [
+            Segment::A, Segment::B, Segment::C, Segment::D,
+            Segment::DP, Segment::E, Segment::F, Segment::G,
         ];
         
-        for &segment in &all_segments {
-            self.set_segment(segment, Value::Inactive)?;
+        for &seg in &segments {
+            self.set_segment(seg, Value::Inactive)?;
         }
 
         Ok(())
@@ -143,80 +161,80 @@ impl SevenSegmentDisplay {
 
         match digit {
             0 => {
-                self.set_segment(GPIO_SEG_A, Value::Active)?;
-                self.set_segment(GPIO_SEG_B, Value::Active)?;
-                self.set_segment(GPIO_SEG_C, Value::Active)?;
-                self.set_segment(GPIO_SEG_D, Value::Active)?;
-                self.set_segment(GPIO_SEG_E, Value::Active)?;
-                self.set_segment(GPIO_SEG_F, Value::Active)?;
+                self.set_segment(Segment::A, Value::Active)?;
+                self.set_segment(Segment::B, Value::Active)?;
+                self.set_segment(Segment::C, Value::Active)?;
+                self.set_segment(Segment::D, Value::Active)?;
+                self.set_segment(Segment::E, Value::Active)?;
+                self.set_segment(Segment::F, Value::Active)?;
             },
             1 => {
-                self.set_segment(GPIO_SEG_B, Value::Active)?;
-                self.set_segment(GPIO_SEG_C, Value::Active)?;
+                self.set_segment(Segment::B, Value::Active)?;
+                self.set_segment(Segment::C, Value::Active)?;
             },
             2 => {
-                self.set_segment(GPIO_SEG_A, Value::Active)?;
-                self.set_segment(GPIO_SEG_B, Value::Active)?;
-                self.set_segment(GPIO_SEG_G, Value::Active)?;
-                self.set_segment(GPIO_SEG_E, Value::Active)?;
-                self.set_segment(GPIO_SEG_D, Value::Active)?;
+                self.set_segment(Segment::A, Value::Active)?;
+                self.set_segment(Segment::B, Value::Active)?;
+                self.set_segment(Segment::G, Value::Active)?;
+                self.set_segment(Segment::E, Value::Active)?;
+                self.set_segment(Segment::D, Value::Active)?;
             },
             3 => {
-                self.set_segment(GPIO_SEG_A, Value::Active)?;
-                self.set_segment(GPIO_SEG_B, Value::Active)?;
-                self.set_segment(GPIO_SEG_G, Value::Active)?;
-                self.set_segment(GPIO_SEG_C, Value::Active)?;
-                self.set_segment(GPIO_SEG_D, Value::Active)?;
+                self.set_segment(Segment::A, Value::Active)?;
+                self.set_segment(Segment::B, Value::Active)?;
+                self.set_segment(Segment::G, Value::Active)?;
+                self.set_segment(Segment::C, Value::Active)?;
+                self.set_segment(Segment::D, Value::Active)?;
             },
             4 => {
-                self.set_segment(GPIO_SEG_F, Value::Active)?;
-                self.set_segment(GPIO_SEG_B, Value::Active)?;
-                self.set_segment(GPIO_SEG_G, Value::Active)?;
-                self.set_segment(GPIO_SEG_C, Value::Active)?;
+                self.set_segment(Segment::F, Value::Active)?;
+                self.set_segment(Segment::B, Value::Active)?;
+                self.set_segment(Segment::G, Value::Active)?;
+                self.set_segment(Segment::C, Value::Active)?;
             },
             5 => {
-                self.set_segment(GPIO_SEG_A, Value::Active)?;
-                self.set_segment(GPIO_SEG_F, Value::Active)?;
-                self.set_segment(GPIO_SEG_G, Value::Active)?;
-                self.set_segment(GPIO_SEG_C, Value::Active)?;
-                self.set_segment(GPIO_SEG_D, Value::Active)?;
+                self.set_segment(Segment::A, Value::Active)?;
+                self.set_segment(Segment::F, Value::Active)?;
+                self.set_segment(Segment::G, Value::Active)?;
+                self.set_segment(Segment::C, Value::Active)?;
+                self.set_segment(Segment::D, Value::Active)?;
             },
             6 => {
-                self.set_segment(GPIO_SEG_A, Value::Active)?;
-                self.set_segment(GPIO_SEG_F, Value::Active)?;
-                self.set_segment(GPIO_SEG_G, Value::Active)?;
-                self.set_segment(GPIO_SEG_E, Value::Active)?;
-                self.set_segment(GPIO_SEG_C, Value::Active)?;
-                self.set_segment(GPIO_SEG_D, Value::Active)?;
+                self.set_segment(Segment::A, Value::Active)?;
+                self.set_segment(Segment::F, Value::Active)?;
+                self.set_segment(Segment::G, Value::Active)?;
+                self.set_segment(Segment::E, Value::Active)?;
+                self.set_segment(Segment::C, Value::Active)?;
+                self.set_segment(Segment::D, Value::Active)?;
             },
             7 => {
-                self.set_segment(GPIO_SEG_A, Value::Active)?;
-                self.set_segment(GPIO_SEG_B, Value::Active)?;
-                self.set_segment(GPIO_SEG_C, Value::Active)?;
+                self.set_segment(Segment::A, Value::Active)?;
+                self.set_segment(Segment::B, Value::Active)?;
+                self.set_segment(Segment::C, Value::Active)?;
             },
             8 => {
-                self.set_segment(GPIO_SEG_A, Value::Active)?;
-                self.set_segment(GPIO_SEG_B, Value::Active)?;
-                self.set_segment(GPIO_SEG_C, Value::Active)?;
-                self.set_segment(GPIO_SEG_D, Value::Active)?;
-                self.set_segment(GPIO_SEG_E, Value::Active)?;
-                self.set_segment(GPIO_SEG_F, Value::Active)?;
-                self.set_segment(GPIO_SEG_G, Value::Active)?;
+                self.set_segment(Segment::A, Value::Active)?;
+                self.set_segment(Segment::B, Value::Active)?;
+                self.set_segment(Segment::C, Value::Active)?;
+                self.set_segment(Segment::D, Value::Active)?;
+                self.set_segment(Segment::E, Value::Active)?;
+                self.set_segment(Segment::F, Value::Active)?;
+                self.set_segment(Segment::G, Value::Active)?;
             },
             9 => {
-                self.set_segment(GPIO_SEG_A, Value::Active)?;
-                self.set_segment(GPIO_SEG_B, Value::Active)?;
-                self.set_segment(GPIO_SEG_C, Value::Active)?;
-                self.set_segment(GPIO_SEG_D, Value::Active)?;
-                self.set_segment(GPIO_SEG_F, Value::Active)?;
-                self.set_segment(GPIO_SEG_G, Value::Active)?;
+                self.set_segment(Segment::A, Value::Active)?;
+                self.set_segment(Segment::B, Value::Active)?;
+                self.set_segment(Segment::C, Value::Active)?;
+                self.set_segment(Segment::D, Value::Active)?;
+                self.set_segment(Segment::F, Value::Active)?;
+                self.set_segment(Segment::G, Value::Active)?;
             },
             10 => {
-                self.set_segment(GPIO_SEG_A, Value::Active)?;
-                self.set_segment(GPIO_SEG_G, Value::Active)?;
-                self.set_segment(GPIO_SEG_E, Value::Active)?;
-                self.set_segment(GPIO_SEG_D, Value::Active)?;
-                self.set_segment(GPIO_SEG_C, Value::Active)?;
+                self.set_segment(Segment::A, Value::Active)?;
+                self.set_segment(Segment::G, Value::Active)?;
+                self.set_segment(Segment::E, Value::Active)?;
+                self.set_segment(Segment::D, Value::Active)?;
+                self.set_segment(Segment::C, Value::Active)?;
             },
             _ => (),
         };
@@ -232,7 +250,7 @@ impl SevenSegmentDisplay {
     /// # Returns
     /// * `Result<(), Box<dyn Error>>` - Result of the operation.
     pub fn set_decimal_point(&mut self, state: bool) -> Result<(), Box<dyn std::error::Error>> {
-        self.set_segment(GPIO_SEG_DP, if state { Value::Active } else { Value::Inactive })
+        self.set_segment(Segment::DP, if state { Value::Active } else { Value::Inactive })
     }
 }
 
